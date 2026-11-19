@@ -1,7 +1,5 @@
-// Importa o Router do Express para criar as rotas
 import { Router } from "express";
 
-// Importa as funções responsáveis pelas operações dos livros
 import {
     listarLivros,
     buscarLivro,
@@ -10,23 +8,32 @@ import {
     excluirLivro
 } from "../controllers/livroController";
 
-// Cria uma instância do roteador
+import { atualizarEstoque } from "../controllers/estoqueController";
+
+import {
+    autenticar,
+    exigirAdministrador
+} from "../authMiddleware";
+
 const router = Router();
 
-// GET: lista todos os livros cadastrados
-router.get("/", listarLivros);
+// Todas as rotas exigem autenticação
+router.use(autenticar);
 
-// GET: busca um livro pelo ID
+// Consulta de livros: administrador e funcionário
+router.get("/", listarLivros);
 router.get("/:id", buscarLivro);
 
-// POST: cadastra um novo livro
+// Cadastro de livros: administrador e funcionário
 router.post("/", cadastrarLivro);
 
-// PUT: atualiza os dados de um livro
-router.put("/:id", atualizarLivro);
+// Atualização exclusiva do estoque
+router.patch("/:id/estoque", atualizarEstoque);
 
-// DELETE: exclui um livro pelo ID
-router.delete("/:id", excluirLivro);
+// Edição completa: somente administrador
+router.put("/:id", exigirAdministrador, atualizarLivro);
 
-// Exporta as rotas para serem utilizadas no server.ts
+// Exclusão: somente administrador
+router.delete("/:id", exigirAdministrador, excluirLivro);
+
 export default router;
