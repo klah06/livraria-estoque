@@ -216,3 +216,116 @@ export const criarPrimeiroAdministrador = async (req: Request, res: Response) =>
         });
     }
 };
+
+// Lista os funcionários cadastrados (somente administrador)
+export const listarFuncionarios = async (req: Request, res: Response) => {
+    try {
+        const funcionarios = await Usuario.find({
+            cargo: "funcionario"
+        }).select("-senhaHash");
+
+        return res.status(200).json({
+            funcionarios: funcionarios.map((funcionario) => ({
+                id: funcionario._id.toString(),
+                nome: funcionario.nome,
+                identificador: funcionario.identificador,
+                cargo: funcionario.cargo,
+                ativo: funcionario.ativo
+            }))
+        });
+
+    } catch (erro) {
+        console.error("Erro ao listar funcionários:", erro);
+
+        return res.status(500).json({
+            mensagem: "Erro ao carregar funcionários."
+        });
+    }
+};
+
+// Edita os dados de um funcionário (somente administrador)
+
+// Edita os dados de um funcionário (somente administrador)
+export const editarFuncionario = async (req: Request, res: Response) => {
+    try {
+        const { id } = req.params;
+        const { nome, identificador, senha, ativo } = req.body;
+
+        const funcionario = await Usuario.findById(id);
+
+        if (!funcionario || funcionario.cargo !== "funcionario") {
+            return res.status(404).json({
+                mensagem: "Funcionário não encontrado."
+            });
+        }
+
+        if (nome !== undefined) {
+            if (!String(nome).trim()) {
+                return res.status(400).json({
+                    mensagem: "O nome não pode ficar vazio."
+                });
+            }
+
+            funcionario.nome = String(nome).trim();
+        }
+
+        if (identificador !== undefined) {
+            const identificadorNormalizado = String(identificador)
+                .trim()
+                .toLowerCase();
+
+            if (!identificadorNormalizado) {
+                return res.status(400).json({
+                    mensagem: "O identificador não pode ficar vazio."
+                });
+            }
+
+            const identificadorExistente = await Usuario.findOne({
+                identificador: identificadorNormalizado,
+                _id: { $ne: funcionario._id }
+            });
+
+            if (identificadorExistente) {
+                return res.status(409).json({
+                    mensagem: "Esse identificador já está cadastrado."
+                });
+            }
+
+            funcionario.identificador = identificadorNormalizado;
+        }
+
+        if (senha !== undefined && String(senha).trim() !== "") {
+            if (String(senha).length < 8) {
+                return res.status(400).json({
+                    mensagem: "A senha deve ter pelo menos 8 caracteres."
+                });
+            }
+
+            funcionario.senhaHash = await bcrypt.hash(String(senha), 12);
+        }
+
+        if (ativo !== undefined) {
+            funcionario.ativo = Boolean(ativo);
+        }
+
+        await funcionario.save();
+
+        return res.status(200).json({
+            mensagem: "Funcionário atualizado com sucesso!",
+            funcionario: {
+                id: funcionario._id.toString(),
+                nome: funcionario.nome,
+                identificador: funcionario.identificador,
+                cargo: funcionario.cargo,
+                ativo: funcionario.ativo
+            }
+        });
+
+    } catch (erro) {
+        console.error("Erro ao editar funcionário:", erro);
+
+        return res.status(500).json({
+            mensagem: "Erro ao atualizar funcionário."
+        });
+    }
+};

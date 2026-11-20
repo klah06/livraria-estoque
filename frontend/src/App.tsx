@@ -14,7 +14,9 @@ import {
   Trash2,
   X,
   Save,
-  LogOut
+  LogOut,
+  Eye,
+  EyeOff
 } from "lucide-react";
 import "./App.css";
 
@@ -56,7 +58,23 @@ interface RespostaLogin {
   usuario: UsuarioLogado;
 }
 
-type Pagina = "dashboard" | "livros" | "estoque";
+interface Funcionario {
+  id: string;
+  nome: string;
+  identificador: string;
+  cargo: "funcionario";
+  ativo: boolean;
+}
+
+interface FormularioFuncionario {
+  nome: string;
+  identificador: string;
+  senha: string;
+  senhaAdministrador: string;
+  ativo: boolean;
+}
+
+type Pagina = "dashboard" | "livros" | "estoque" | "funcionarios";
 type TipoModal = "cadastro" | "edicao" | "estoque";
 
 const API = "http://localhost:3000";
@@ -71,6 +89,14 @@ const formularioInicial: FormularioLivro = {
   genero: "",
   preco: "",
   sku: ""
+};
+
+const formularioFuncionarioInicial: FormularioFuncionario = {
+  nome: "",
+  identificador: "",
+  senha: "",
+  senhaAdministrador: "",
+  ativo: true
 };
 
 function recuperarUsuario(): UsuarioLogado | null {
@@ -93,14 +119,18 @@ function App() {
 
   const [identificador, setIdentificador] = useState("");
   const [senha, setSenha] = useState("");
+  const [mostrarSenha, setMostrarSenha] = useState(false);
   const [entrando, setEntrando] = useState(false);
 
   const [menuAberto, setMenuAberto] = useState(true);
   const [livros, setLivros] = useState<Livro[]>([]);
+  const [funcionarios, setFuncionarios] = useState<Funcionario[]>([]);
+  const [carregandoFuncionarios, setCarregandoFuncionarios] = useState(false);
   const [busca, setBusca] = useState("");
   const [carregando, setCarregando] = useState(
     () => Boolean(sessionStorage.getItem("token"))
   );
+
   const [salvando, setSalvando] = useState(false);
   const [erro, setErro] = useState("");
   const [pagina, setPagina] = useState<Pagina>("dashboard");
@@ -112,6 +142,16 @@ function App() {
     useState<FormularioLivro>(formularioInicial);
   const [quantidadeEstoque, setQuantidadeEstoque] = useState("");
 
+  const [modalFuncionarioAberto, setModalFuncionarioAberto] = useState(false);
+  const [funcionarioEditando, setFuncionarioEditando] =
+    useState<string | null>(null);
+  const [formularioFuncionario, setFormularioFuncionario] =
+    useState<FormularioFuncionario>(formularioFuncionarioInicial);
+
+  const [mostrarSenhaFuncionario, setMostrarSenhaFuncionario] = useState(false);
+  const [mostrarSenhaAdministrador, setMostrarSenhaAdministrador] =
+    useState(false);
+
   const ehAdministrador = usuario?.cargo === "administrador";
 
   // Encerra a sessão
@@ -122,14 +162,16 @@ function App() {
     setToken("");
     setUsuario(null);
     setLivros([]);
+    setFuncionarios([]);
     setSenha("");
     setIdentificador("");
     setErro("");
     setCarregando(false);
     setModalAberto(false);
+    setModalFuncionarioAberto(false);
   };
 
-  // Carrega os livros da API
+  // Carrega os livros
   const carregarLivros = useCallback(async () => {
     if (!token) {
       setCarregando(false);
@@ -137,8 +179,6 @@ function App() {
     }
 
     try {
-      setErro("");
-
       const resposta = await fetch(`${API}/livros`, {
         headers: {
           Authorization: `Bearer ${token}`
@@ -173,7 +213,61 @@ function App() {
     }
   }, [token, usuario, carregarLivros]);
 
-  // Realiza o login
+  // Carrega os funcionários
+  const carregarFuncionarios = useCallback(async () => {
+    if (!token || !ehAdministrador) {
+      setFuncionarios([]);
+      return;
+    }
+
+    setCarregandoFuncionarios(true);
+
+    try {
+      const resposta = await fetch(`${API}/usuarios/funcionarios`, {
+        headers: {
+          Authorization: `Bearer ${token}`
+        }
+      });
+
+      if (resposta.status === 401) {
+        sair();
+        return;
+      }
+
+      if (!resposta.ok) {
+        const dados = await resposta.json().catch(() => null);
+
+        throw new Error(
+          dados?.mensagem || "Não foi possível carregar os funcionários."
+        );
+      }
+
+      const dados: { funcionarios: Funcionario[] } =
+        await resposta.json();
+
+      setFuncionarios(dados.funcionarios);
+    } catch (error) {
+      console.error("Erro ao carregar funcionários:", error);
+
+      setErro(
+        error instanceof Error
+          ? error.message
+          : "Erro ao carregar funcionários."
+      );
+    } finally {
+      setCarregandoFuncionarios(false);
+    }
+  }, [token, ehAdministrador]);
+
+  useEffect(() => {
+    if (token && ehAdministrador) {
+      carregarFuncionarios();
+    } else {
+      setFuncionarios([]);
+    }
+  }, [token, ehAdministrador, carregarFuncionarios]);
+
+  // Login
   const realizarLogin = async (evento: FormEvent<HTMLFormElement>) => {
     evento.preventDefault();
 
@@ -186,10 +280,7 @@ function App() {
         headers: {
           "Content-Type": "application/json"
         },
-        body: JSON.stringify({
-          identificador,
-          senha
-        })
+        body: JSON.stringify({ identificador, senha })
       });
 
       const dados = await resposta.json() as Partial<RespostaLogin> & {
@@ -197,7 +288,9 @@ function App() {
       };
 
       if (!resposta.ok) {
-        throw new Error(dados.mensagem || "Não foi possível realizar o login.");
+        throw new Error(
+          dados.mensagem || "Não foi possível realizar o login."
+        );
       }
 
       if (!dados.token || !dados.usuario) {
@@ -210,6 +303,7 @@ function App() {
       setToken(dados.token);
       setUsuario(dados.usuario);
       setSenha("");
+      setMostrarSenha(false);
       setPagina("dashboard");
       setBusca("");
       setCarregando(true);
@@ -226,7 +320,7 @@ function App() {
     }
   };
 
-  // Indicadores do dashboard
+  // Indicadores
   const totalLivros = livros.length;
 
   const totalUnidades = livros.reduce(
@@ -249,7 +343,7 @@ function App() {
       currency: "BRL"
     }).format(valor);
 
-  // Filtra os livros
+  // Filtra livros
   const livrosFiltrados = livros.filter((livro) => {
     const termo = busca.toLowerCase();
 
@@ -264,7 +358,17 @@ function App() {
     return correspondeBusca && correspondeEstoque;
   });
 
-  // Abre o formulário de cadastro
+  // Filtra funcionários
+  const funcionariosFiltrados = funcionarios.filter((funcionario) => {
+    const termo = busca.toLowerCase();
+
+    return (
+      funcionario.nome.toLowerCase().includes(termo) ||
+      funcionario.identificador.toLowerCase().includes(termo)
+    );
+  });
+
+  // Cadastro de livro
   const abrirCadastro = () => {
     setTipoModal("cadastro");
     setLivroEditando(null);
@@ -273,7 +377,7 @@ function App() {
     setModalAberto(true);
   };
 
-  // Abre a edição completa (administrador)
+  // Editar livro
   const abrirEdicao = (livro: Livro) => {
     if (!ehAdministrador) return;
 
@@ -296,7 +400,7 @@ function App() {
     setModalAberto(true);
   };
 
-  // Abre a atualização de estoque
+  // Atualizar estoque
   const abrirAtualizacaoEstoque = (livro: Livro) => {
     setTipoModal("estoque");
     setLivroEditando(livro._id);
@@ -305,7 +409,6 @@ function App() {
     setModalAberto(true);
   };
 
-  // Atualiza os campos do formulário
   const atualizarCampo = (
     campo: keyof FormularioLivro,
     valor: string
@@ -316,7 +419,7 @@ function App() {
     }));
   };
 
-  // Cadastra, edita ou atualiza o estoque
+  // Salvar livro
   const salvarLivro = async (evento: FormEvent<HTMLFormElement>) => {
     evento.preventDefault();
 
@@ -329,11 +432,10 @@ function App() {
       if (tipoModal === "estoque") {
         const quantidade = Number(quantidadeEstoque);
 
-        if (
-          !Number.isInteger(quantidade) ||
-          quantidade < 0
-        ) {
-          throw new Error("Informe uma quantidade inteira igual ou maior que zero.");
+        if (!Number.isInteger(quantidade) || quantidade < 0) {
+          throw new Error(
+            "Informe uma quantidade inteira igual ou maior que zero."
+          );
         }
 
         resposta = await fetch(
@@ -354,12 +456,10 @@ function App() {
           ano_pub: Number(formulario.ano_pub),
           classificacao: Number(formulario.classificacao),
           num_paginas: Number(formulario.num_paginas),
+          estoque: Number(formulario.estoque),
           genero: formulario.genero.trim(),
           preco: Number(formulario.preco),
-          sku: formulario.sku.trim(),
-          ...(tipoModal === "cadastro"
-            ? { estoque: Number(formulario.estoque) }
-            : {})
+          sku: formulario.sku.trim()
         };
 
         resposta = await fetch(
@@ -388,6 +488,7 @@ function App() {
 
       if (!resposta.ok) {
         const dados = await resposta.json().catch(() => null);
+
         throw new Error(
           dados?.mensagem || "Não foi possível salvar as informações."
         );
@@ -412,7 +513,7 @@ function App() {
     }
   };
 
-  // Exclui um livro (administrador)
+  // Excluir livro
   const excluirLivro = async (livro: Livro) => {
     if (!ehAdministrador) return;
 
@@ -457,6 +558,172 @@ function App() {
     }
   };
 
+  // Abrir cadastro de funcionário
+  const abrirCadastroFuncionario = () => {
+    if (!ehAdministrador) return;
+
+    setFuncionarioEditando(null);
+    setFormularioFuncionario(formularioFuncionarioInicial);
+    setMostrarSenhaFuncionario(false);
+    setMostrarSenhaAdministrador(false);
+    setErro("");
+    setModalFuncionarioAberto(true);
+  };
+
+  // Abrir edição de funcionário
+  const abrirEdicaoFuncionario = (funcionario: Funcionario) => {
+    if (!ehAdministrador) return;
+
+    setFuncionarioEditando(funcionario.id);
+
+    setFormularioFuncionario({
+      nome: funcionario.nome,
+      identificador: funcionario.identificador,
+      senha: "",
+      senhaAdministrador: "",
+      ativo: funcionario.ativo
+    });
+
+    setMostrarSenhaFuncionario(false);
+    setMostrarSenhaAdministrador(false);
+    setErro("");
+    setModalFuncionarioAberto(true);
+  };
+
+  // Salvar cadastro ou edição de funcionário
+  const salvarFuncionario = async (
+    evento: FormEvent<HTMLFormElement>
+  ) => {
+    evento.preventDefault();
+
+    if (!ehAdministrador) return;
+
+    setSalvando(true);
+    setErro("");
+
+    try {
+      const nome = formularioFuncionario.nome.trim();
+
+      const identificadorFuncionario =
+        formularioFuncionario.identificador.trim();
+
+      const senhaFuncionario = formularioFuncionario.senha;
+
+      if (!nome || !identificadorFuncionario) {
+        throw new Error("Preencha o nome e o identificador.");
+      }
+
+      let resposta: Response;
+
+      if (funcionarioEditando) {
+        const dadosFuncionario: {
+          nome: string;
+          identificador: string;
+          senha?: string;
+          ativo: boolean;
+        } = {
+          nome,
+          identificador: identificadorFuncionario,
+          ativo: formularioFuncionario.ativo
+        };
+
+        if (senhaFuncionario.trim()) {
+          if (senhaFuncionario.length < 8) {
+            throw new Error(
+              "A nova senha deve ter pelo menos 8 caracteres."
+            );
+          }
+
+          dadosFuncionario.senha = senhaFuncionario;
+        }
+
+        resposta = await fetch(
+          `${API}/usuarios/funcionarios/${funcionarioEditando}`,
+          {
+            method: "PUT",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${token}`
+            },
+            body: JSON.stringify(dadosFuncionario)
+          }
+        );
+      } else {
+        if (!senhaFuncionario) {
+          throw new Error("Informe uma senha para o funcionário.");
+        }
+
+        if (senhaFuncionario.length < 8) {
+          throw new Error(
+            "A senha deve ter pelo menos 8 caracteres."
+          );
+        }
+
+        if (!formularioFuncionario.senhaAdministrador) {
+          throw new Error(
+            "Informe sua senha de administrador para autorizar."
+          );
+        }
+
+        resposta = await fetch(`${API}/usuarios/funcionario`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({
+            nome,
+            identificador: identificadorFuncionario,
+            senha: senhaFuncionario,
+            senhaAdministrador: formularioFuncionario.senhaAdministrador
+          })
+        });
+      }
+
+      if (resposta.status === 401) {
+        sair();
+        throw new Error("Sua sessão expirou. Faça login novamente.");
+      }
+
+      if (resposta.status === 403) {
+        const dados = await resposta.json().catch(() => null);
+
+        throw new Error(
+          dados?.mensagem ||
+          "A autorização não foi aceita. Confira a senha do administrador."
+        );
+      }
+
+      if (!resposta.ok) {
+        const dados = await resposta.json().catch(() => null);
+
+        throw new Error(
+          dados?.mensagem ||
+          (funcionarioEditando
+            ? "Não foi possível atualizar o funcionário."
+            : "Não foi possível cadastrar o funcionário.")
+        );
+      }
+
+      setModalFuncionarioAberto(false);
+      setFuncionarioEditando(null);
+      setFormularioFuncionario(formularioFuncionarioInicial);
+      setMostrarSenhaFuncionario(false);
+      setMostrarSenhaAdministrador(false);
+
+      await carregarFuncionarios();
+    } catch (error) {
+      console.error("Erro ao salvar funcionário:", error);
+
+      setErro(
+        error instanceof Error
+          ? error.message
+          : "Não foi possível salvar o funcionário."
+      );
+    } finally {
+      setSalvando(false);
+    }
+  };
+
   const fecharModal = () => {
     setModalAberto(false);
     setLivroEditando(null);
@@ -465,12 +732,21 @@ function App() {
     setErro("");
   };
 
-  const tituloPagina = {
-    dashboard: "Painel de controle",
-    livros: "Seus livros",
-    estoque: "Estoque baixo"
+  const fecharModalFuncionario = () => {
+    setModalFuncionarioAberto(false);
+    setFuncionarioEditando(null);
+    setFormularioFuncionario(formularioFuncionarioInicial);
+    setMostrarSenhaFuncionario(false);
+    setMostrarSenhaAdministrador(false);
+    setErro("");
   };
 
+  const tituloPagina = {
+    dashboard: "Painel",
+    livros: "Livros",
+    estoque: "Estoque",
+    funcionarios: "Funcionários"
+};
   // Tela de login
   if (!token || !usuario) {
     return (
@@ -501,14 +777,25 @@ function App() {
 
             <label>
               Senha
-              <input
-                type="password"
-                value={senha}
-                onChange={(e) => setSenha(e.target.value)}
-                placeholder="Digite sua senha"
-                autoComplete="current-password"
-                required
-              />
+              <div className="campo-senha">
+                <input
+                  type={mostrarSenha ? "text" : "password"}
+                  value={senha}
+                  onChange={(e) => setSenha(e.target.value)}
+                  placeholder="Digite sua senha"
+                  autoComplete="current-password"
+                  required
+                />
+
+                <button
+                  type="button"
+                  onClick={() => setMostrarSenha(!mostrarSenha)}
+                  aria-label={mostrarSenha ? "Ocultar senha" : "Mostrar senha"}
+                  title={mostrarSenha ? "Ocultar senha" : "Mostrar senha"}
+                >
+                  {mostrarSenha ? <EyeOff size={19} /> : <Eye size={19} />}
+                </button>
+              </div>
             </label>
 
             {erro && <p className="mensagem-erro">{erro}</p>}
@@ -547,10 +834,11 @@ function App() {
               e.preventDefault();
               setPagina("dashboard");
               setBusca("");
+              setErro("");
             }}
           >
             <LayoutDashboard size={19} />
-            <span>Dashboard</span>
+            <span>Painel</span>
           </a>
 
           <a
@@ -560,6 +848,7 @@ function App() {
               e.preventDefault();
               setPagina("livros");
               setBusca("");
+              setErro("");
             }}
           >
             <BookOpen size={19} />
@@ -573,11 +862,29 @@ function App() {
               e.preventDefault();
               setPagina("estoque");
               setBusca("");
+              setErro("");
             }}
           >
             <Package size={19} />
             <span>Estoque</span>
           </a>
+
+          {ehAdministrador && (
+            <a
+              href="#funcionarios"
+              className={pagina === "funcionarios" ? "ativo" : ""}
+              onClick={(e) => {
+                e.preventDefault();
+                setPagina("funcionarios");
+                setBusca("");
+                setErro("");
+                carregarFuncionarios();
+              }}
+            >
+              <ShoppingBag size={19} />
+              <span>Funcionários</span>
+            </a>
+          )}
         </nav>
 
         <div className="sidebar-footer">
@@ -623,28 +930,50 @@ function App() {
           </div>
         </header>
 
+        {/* Conteúdo principal da página */}
         <section className="pagina">
           <div className="titulo-pagina">
-            <div>
-              <span className="subtitulo">
-                {pagina === "dashboard" ? "VISÃO GERAL" : "GERENCIAMENTO"}
-              </span>
+  <div>
+    <span className="subtitulo">
+      {pagina === "dashboard"
+        ? "VISÃO GERAL"
+        : pagina === "funcionarios"
+          ? "EQUIPE"
+          : "GERENCIAMENTO"}
+    </span>
 
-              <h1>{tituloPagina[pagina]}</h1>
+    <h1>{tituloPagina[pagina]}</h1>
 
-              <p>
-                {pagina === "dashboard"
-                  ? "Acompanhe o desempenho da sua livraria."
-                  : pagina === "livros"
-                    ? "Consulte, cadastre e gerencie seus livros."
-                    : "Acompanhe os livros que precisam de reposição."}
-              </p>
-            </div>
+        <p>
+          {pagina === "dashboard"
+            ? "Acompanhe o desempenho da sua livraria."
+            : pagina === "livros"
+              ? "Consulte, cadastre e gerencie seus livros."
+              : pagina === "funcionarios"
+                ? "Consulte, cadastre e edite os funcionários da livraria."
+                : "Acompanhe os livros que precisam de reposição."}
+        </p>
+      </div>
 
-            <button className="botao-principal" onClick={abrirCadastro}>
-              <Plus size={18} /> Novo livro
-            </button>
-          </div>
+      {pagina === "funcionarios" && ehAdministrador ? (
+        <button
+          type="button"
+          className="botao-principal"
+          onClick={abrirCadastroFuncionario}
+        >
+          <Plus size={18} /> Adicionar funcionário
+        </button>
+      ) : pagina !== "funcionarios" ? (
+        <button
+          type="button"
+          className="botao-principal"
+          onClick={abrirCadastro}
+        >
+          <Plus size={18} /> Novo livro
+        </button>
+      ) : null}
+    </div>
+          
 
           {erro && <p className="mensagem-erro">{erro}</p>}
 
@@ -696,131 +1025,224 @@ function App() {
             </div>
           )}
 
-          <div className="secao-livros">
-            <div className="secao-header">
-              <div>
-                <h2>
-                  {pagina === "estoque"
-                    ? "Livros com estoque baixo"
-                    : pagina === "livros"
-                      ? "Todos os livros"
-                      : "Seus livros"}
-                </h2>
+          {/* Área exclusiva de funcionários */}
+          {pagina === "funcionarios" && ehAdministrador && (
+            <div className="secao-livros">
+              <div className="secao-header">
+                <div>
+                  <h2>Funcionários cadastrados</h2>
+                  <p>Consulte e gerencie os usuários da sua equipe.</p>
+                </div>
 
-                <p>
-                  {pagina === "estoque"
-                    ? "Livros com 5 unidades ou menos."
-                    : "Gerencie os livros cadastrados na livraria."}
-                </p>
+                <strong>
+                  {funcionarios.length} funcionário(s)
+                </strong>
               </div>
 
               <div className="busca">
                 <Search size={18} />
                 <input
                   type="text"
-                  placeholder="Buscar livro..."
+                  placeholder="Buscar funcionário..."
                   value={busca}
                   onChange={(e) => setBusca(e.target.value)}
                 />
               </div>
-            </div>
 
-            {carregando ? (
-              <div className="estado-vazio">
-                <p>Carregando livros...</p>
-              </div>
-            ) : livrosFiltrados.length > 0 ? (
-              <div className="lista-livros">
-                {livrosFiltrados.map((livro) => (
-                  <div className="item-livro" key={livro._id}>
-                    <div className="livro-info">
-                      <strong>{livro.title}</strong>
-                      <span>{livro.author}</span>
-                    </div>
+              {carregandoFuncionarios ? (
+                <div className="estado-vazio">
+                  <p>Carregando funcionários...</p>
+                </div>
+              ) : funcionariosFiltrados.length > 0 ? (
+                <div className="lista-livros">
+                  {funcionariosFiltrados.map((funcionario) => (
+                    <div className="item-livro" key={funcionario.id}>
+                      <div className="livro-info">
+                        <strong>{funcionario.nome}</strong>
+                        <span>{funcionario.identificador}</span>
+                      </div>
 
-                    <span className="livro-genero">{livro.genero}</span>
+                      <span className="livro-genero">Funcionário</span>
 
-                    <span className="livro-estoque">
-                      {livro.estoque === 0
-                        ? "Esgotado"
-                        : `${livro.estoque} unidades`}
-                    </span>
+                      <span className="livro-estoque">
+                        {funcionario.ativo ? "Ativo" : "Inativo"}
+                      </span>
 
-                    <strong className="livro-preco">
-                      {formatarMoeda(livro.preco)}
-                    </strong>
-
-                    <div className="acoes-livro">
-                      {ehAdministrador && (
+                      <div className="acoes-livro">
                         <button
                           type="button"
-                          onClick={() => abrirEdicao(livro)}
-                          aria-label={`Editar ${livro.title}`}
-                          title="Editar dados do livro"
+                          onClick={() => abrirEdicaoFuncionario(funcionario)}
+                          aria-label={`Editar ${funcionario.nome}`}
+                          title="Editar funcionário"
                         >
                           <Pencil size={17} />
                         </button>
-                      )}
-
-                      <button
-                        type="button"
-                        onClick={() => abrirAtualizacaoEstoque(livro)}
-                        aria-label={`Atualizar estoque de ${livro.title}`}
-                        title="Atualizar estoque"
-                      >
-                        <Package size={17} />
-                      </button>
-
-                      {ehAdministrador && (
-                        <button
-                          type="button"
-                          onClick={() => excluirLivro(livro)}
-                          aria-label={`Excluir ${livro.title}`}
-                          title="Excluir livro"
-                        >
-                          <Trash2 size={17} />
-                        </button>
-                      )}
+                      </div>
                     </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="estado-vazio">
+                  <div className="livro-ilustracao">
+                    <ShoppingBag size={35} />
                   </div>
-                ))}
-              </div>
-            ) : (
-              <div className="estado-vazio">
-                <div className="livro-ilustracao">
-                  <ShoppingBag size={35} />
+
+                  <h3>
+                    {busca
+                      ? "Nenhum funcionário encontrado"
+                      : "Nenhum funcionário cadastrado"}
+                  </h3>
+
+                  <p>
+                    {busca
+                      ? "Tente buscar por outro nome ou identificador."
+                      : "Adicione funcionários para que eles apareçam nesta seção."}
+                  </p>
+
+                  {!busca && (
+                    <button
+                      type="button"
+                      className="botao-principal"
+                      onClick={abrirCadastroFuncionario}
+                    >
+                      <Plus size={18} /> Adicionar funcionário
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Área de livros: não aparece na aba Funcionários */}
+          {pagina !== "funcionarios" && (
+            <div className="secao-livros">
+              <div className="secao-header">
+                <div>
+                  <h2>
+                    {pagina === "estoque"
+                      ? "Livros com estoque baixo"
+                      : pagina === "livros"
+                        ? "Todos os livros"
+                        : "Seus livros"}
+                  </h2>
+
+                  <p>
+                    {pagina === "estoque"
+                      ? "Livros com 5 unidades ou menos."
+                      : "Gerencie os livros cadastrados na livraria."}
+                  </p>
                 </div>
 
-                <h3>
-                  {busca
-                    ? "Nenhum livro encontrado"
-                    : pagina === "estoque"
-                      ? "Nenhum livro com estoque baixo"
-                      : "Nenhum livro por aqui ainda"}
-                </h3>
-
-                <p>
-                  {busca
-                    ? "Tente pesquisar por outro título, autor ou SKU."
-                    : pagina === "estoque"
-                      ? "Todos os livros estão com estoque acima de 5 unidades."
-                      : "Seus livros cadastrados aparecerão nesta seção."}
-                </p>
-
-                {pagina !== "estoque" && !busca && (
-                  <button
-                    className="botao-principal"
-                    onClick={abrirCadastro}
-                  >
-                    <Plus size={18} /> Cadastrar primeiro livro
-                  </button>
-                )}
+                <div className="busca">
+                  <Search size={18} />
+                  <input
+                    type="text"
+                    placeholder="Buscar livro..."
+                    value={busca}
+                    onChange={(e) => setBusca(e.target.value)}
+                  />
+                </div>
               </div>
-            )}
-          </div>
+
+              {carregando ? (
+                <div className="estado-vazio">
+                  <p>Carregando livros...</p>
+                </div>
+              ) : livrosFiltrados.length > 0 ? (
+                <div className="lista-livros">
+                  {livrosFiltrados.map((livro) => (
+                    <div className="item-livro" key={livro._id}>
+                      <div className="livro-info">
+                        <strong>{livro.title}</strong>
+                        <span>{livro.author}</span>
+                      </div>
+
+                      <span className="livro-genero">{livro.genero}</span>
+
+                      <span className="livro-estoque">
+                        {livro.estoque === 0
+                          ? "Esgotado"
+                          : `${livro.estoque} unidades`}
+                      </span>
+
+                      <strong className="livro-preco">
+                        {formatarMoeda(livro.preco)}
+                      </strong>
+
+                      <div className="acoes-livro">
+                        {ehAdministrador && (
+                          <button
+                            type="button"
+                            onClick={() => abrirEdicao(livro)}
+                            aria-label={`Editar ${livro.title}`}
+                            title="Editar dados do livro"
+                          >
+                            <Pencil size={17} />
+                          </button>
+                        )}
+
+                        <button
+                          type="button"
+                          onClick={() => abrirAtualizacaoEstoque(livro)}
+                          aria-label={`Atualizar estoque de ${livro.title}`}
+                          title="Atualizar estoque"
+                        >
+                          <Package size={17} />
+                        </button>
+
+                        {ehAdministrador && (
+                          <button
+                            type="button"
+                            onClick={() => excluirLivro(livro)}
+                            aria-label={`Excluir ${livro.title}`}
+                            title="Excluir livro"
+                          >
+                            <Trash2 size={17} />
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="estado-vazio">
+                  <div className="livro-ilustracao">
+                    <ShoppingBag size={35} />
+                  </div>
+
+                  <h3>
+                    {busca
+                      ? "Nenhum livro encontrado"
+                      : pagina === "estoque"
+                        ? "Nenhum livro com estoque baixo"
+                        : "Nenhum livro por aqui ainda"}
+                  </h3>
+
+                  <p>
+                    {busca
+                      ? "Tente pesquisar por outro título, autor ou SKU."
+                      : pagina === "estoque"
+                        ? "Todos os livros estão com estoque acima de 5 unidades."
+                        : "Seus livros cadastrados aparecerão nesta seção."}
+                  </p>
+
+                  {pagina !== "estoque" && !busca && (
+                    <button
+                      type="button"
+                      className="botao-principal"
+                      onClick={abrirCadastro}
+                    >
+                      <Plus size={18} /> Cadastrar primeiro livro
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
         </section>
       </main>
 
+      {/* Modal de livros */}
       {modalAberto && (
         <div className="modal-fundo" onClick={fecharModal}>
           <div
@@ -1007,6 +1429,230 @@ function App() {
                       : tipoModal === "edicao"
                         ? "Salvar alterações"
                         : "Cadastrar livro"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal de cadastro e edição de funcionário */}
+      {modalFuncionarioAberto && (
+        <div
+          className="modal-fundo"
+          onClick={fecharModalFuncionario}
+        >
+          <div
+            className="modal-livro"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="modal-header">
+              <div>
+                <span className="subtitulo">COZY BOOK STORE</span>
+
+                <h2>
+                  {funcionarioEditando
+                    ? "Editar funcionário"
+                    : "Adicionar funcionário"}
+                </h2>
+
+                <p>
+                  {funcionarioEditando
+                    ? "Atualize os dados de acesso do funcionário."
+                    : "Preencha os dados para cadastrar um novo funcionário."}
+                </p>
+              </div>
+
+              <button
+                type="button"
+                className="modal-fechar"
+                onClick={fecharModalFuncionario}
+                aria-label="Fechar formulário"
+              >
+                <X size={21} />
+              </button>
+            </div>
+
+            <form onSubmit={salvarFuncionario}>
+              <div className="formulario-grid">
+                <label className="campo-completo">
+                  Nome completo
+                  <input
+                    required
+                    value={formularioFuncionario.nome}
+                    onChange={(e) =>
+                      setFormularioFuncionario((anterior) => ({
+                        ...anterior,
+                        nome: e.target.value
+                      }))
+                    }
+                    placeholder="Nome do funcionário"
+                  />
+                </label>
+
+                <label className="campo-completo">
+                  Identificador
+                  <input
+                    required
+                    value={formularioFuncionario.identificador}
+                    onChange={(e) =>
+                      setFormularioFuncionario((anterior) => ({
+                        ...anterior,
+                        identificador: e.target.value
+                      }))
+                    }
+                    placeholder="Usuário de acesso"
+                  />
+                </label>
+
+                <label className="campo-completo">
+                  {funcionarioEditando
+                    ? "Nova senha"
+                    : "Senha do funcionário"}
+
+                  <div className="campo-senha">
+                    <input
+                      type={mostrarSenhaFuncionario ? "text" : "password"}
+                      value={formularioFuncionario.senha}
+                      onChange={(e) =>
+                        setFormularioFuncionario((anterior) => ({
+                          ...anterior,
+                          senha: e.target.value
+                        }))
+                      }
+                      placeholder={
+                        funcionarioEditando
+                          ? "Deixe vazio para manter a senha atual"
+                          : "Crie uma senha com pelo menos 8 caracteres"
+                      }
+                      autoComplete="new-password"
+                      required={!funcionarioEditando}
+                    />
+
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setMostrarSenhaFuncionario(!mostrarSenhaFuncionario)
+                      }
+                      aria-label={
+                        mostrarSenhaFuncionario
+                          ? "Ocultar senha"
+                          : "Mostrar senha"
+                      }
+                      title={
+                        mostrarSenhaFuncionario
+                          ? "Ocultar senha"
+                          : "Mostrar senha"
+                      }
+                    >
+                      {mostrarSenhaFuncionario
+                        ? <EyeOff size={19} />
+                        : <Eye size={19} />}
+                    </button>
+                  </div>
+
+                  {funcionarioEditando && (
+                    <small>
+                      Preencha somente se desejar alterar a senha.
+                    </small>
+                  )}
+                </label>
+
+                {funcionarioEditando && (
+                  <label className="campo-completo">
+                    Situação do funcionário
+
+                    <select
+                      value={
+                        formularioFuncionario.ativo ? "ativo" : "inativo"
+                      }
+                      onChange={(e) =>
+                        setFormularioFuncionario((anterior) => ({
+                          ...anterior,
+                          ativo: e.target.value === "ativo"
+                        }))
+                      }
+                    >
+                      <option value="ativo">Ativo</option>
+                      <option value="inativo">Inativo</option>
+                    </select>
+                  </label>
+                )}
+
+                {!funcionarioEditando && (
+                  <label className="campo-completo">
+                    Sua senha de administrador
+
+                    <div className="campo-senha">
+                      <input
+                        type={mostrarSenhaAdministrador ? "text" : "password"}
+                        value={formularioFuncionario.senhaAdministrador}
+                        onChange={(e) =>
+                          setFormularioFuncionario((anterior) => ({
+                            ...anterior,
+                            senhaAdministrador: e.target.value
+                          }))
+                        }
+                        placeholder="Digite sua senha para autorizar o cadastro"
+                        autoComplete="current-password"
+                        required
+                      />
+
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setMostrarSenhaAdministrador(
+                            !mostrarSenhaAdministrador
+                          )
+                        }
+                        aria-label={
+                          mostrarSenhaAdministrador
+                            ? "Ocultar senha do administrador"
+                            : "Mostrar senha do administrador"
+                        }
+                        title={
+                          mostrarSenhaAdministrador
+                            ? "Ocultar senha"
+                            : "Mostrar senha"
+                        }
+                      >
+                        {mostrarSenhaAdministrador
+                          ? <EyeOff size={19} />
+                          : <Eye size={19} />}
+                      </button>
+                    </div>
+
+                    <small>
+                      Essa senha confirma sua autorização para criar a conta.
+                    </small>
+                  </label>
+                )}
+              </div>
+
+              {erro && <p className="mensagem-erro">{erro}</p>}
+
+              <div className="modal-acoes">
+                <button
+                  type="button"
+                  className="botao-cancelar"
+                  onClick={fecharModalFuncionario}
+                  disabled={salvando}
+                >
+                  Cancelar
+                </button>
+
+                <button
+                  type="submit"
+                  className="botao-principal"
+                  disabled={salvando}
+                >
+                  <Save size={17} />
+
+                  {salvando
+                    ? "Salvando..."
+                    : funcionarioEditando
+                      ? "Salvar alterações"
+                      : "Cadastrar funcionário"}
                 </button>
               </div>
             </form>
