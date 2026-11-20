@@ -13,7 +13,8 @@ import {
   Pencil,
   Trash2,
   X,
-  Save
+  Save,
+  LogOut
 } from "lucide-react";
 import "./App.css";
 
@@ -42,7 +43,23 @@ interface FormularioLivro {
   sku: string;
 }
 
+interface UsuarioLogado {
+  id: string;
+  nome: string;
+  identificador: string;
+  cargo: "administrador" | "funcionario";
+}
+
+interface RespostaLogin {
+  mensagem: string;
+  token: string;
+  usuario: UsuarioLogado;
+}
+
 type Pagina = "dashboard" | "livros" | "estoque";
+type TipoModal = "cadastro" | "edicao" | "estoque";
+
+const API = "http://localhost:3000";
 
 const formularioInicial: FormularioLivro = {
   title: "",
@@ -56,28 +73,83 @@ const formularioInicial: FormularioLivro = {
   sku: ""
 };
 
-const API = "http://localhost:3000/livros";
+function recuperarUsuario(): UsuarioLogado | null {
+  try {
+    const usuario = sessionStorage.getItem("usuario");
+    return usuario ? JSON.parse(usuario) as UsuarioLogado : null;
+  } catch {
+    return null;
+  }
+}
 
 function App() {
+  const [token, setToken] = useState(
+    () => sessionStorage.getItem("token") || ""
+  );
+
+  const [usuario, setUsuario] = useState<UsuarioLogado | null>(
+    recuperarUsuario
+  );
+
+  const [identificador, setIdentificador] = useState("");
+  const [senha, setSenha] = useState("");
+  const [entrando, setEntrando] = useState(false);
+
   const [menuAberto, setMenuAberto] = useState(true);
   const [livros, setLivros] = useState<Livro[]>([]);
   const [busca, setBusca] = useState("");
-  const [carregando, setCarregando] = useState(true);
+  const [carregando, setCarregando] = useState(
+    () => Boolean(sessionStorage.getItem("token"))
+  );
   const [salvando, setSalvando] = useState(false);
   const [erro, setErro] = useState("");
   const [pagina, setPagina] = useState<Pagina>("dashboard");
 
   const [modalAberto, setModalAberto] = useState(false);
+  const [tipoModal, setTipoModal] = useState<TipoModal>("cadastro");
   const [livroEditando, setLivroEditando] = useState<string | null>(null);
   const [formulario, setFormulario] =
     useState<FormularioLivro>(formularioInicial);
+  const [quantidadeEstoque, setQuantidadeEstoque] = useState("");
+
+  const ehAdministrador = usuario?.cargo === "administrador";
+
+  // Encerra a sessão
+  const sair = () => {
+    sessionStorage.removeItem("token");
+    sessionStorage.removeItem("usuario");
+
+    setToken("");
+    setUsuario(null);
+    setLivros([]);
+    setSenha("");
+    setIdentificador("");
+    setErro("");
+    setCarregando(false);
+    setModalAberto(false);
+  };
 
   // Carrega os livros da API
   const carregarLivros = useCallback(async () => {
+    if (!token) {
+      setCarregando(false);
+      return;
+    }
+
     try {
       setErro("");
 
-      const resposta = await fetch(API);
+      const resposta = await fetch(`${API}/livros`, {
+        headers: {
+          Authorization: `Bearer ${token}`
+        }
+      });
+
+      if (resposta.status === 401) {
+        sair();
+        setErro("Sua sessão expirou. Faça login novamente.");
+        return;
+      }
 
       if (!resposta.ok) {
         throw new Error("Não foi possível carregar os livros.");
@@ -91,11 +163,68 @@ function App() {
     } finally {
       setCarregando(false);
     }
-  }, []);
+  }, [token]);
 
   useEffect(() => {
-    carregarLivros();
-  }, [carregarLivros]);
+    if (token && usuario) {
+      carregarLivros();
+    } else {
+      setCarregando(false);
+    }
+  }, [token, usuario, carregarLivros]);
+
+  // Realiza o login
+  const realizarLogin = async (evento: FormEvent<HTMLFormElement>) => {
+    evento.preventDefault();
+
+    setEntrando(true);
+    setErro("");
+
+    try {
+      const resposta = await fetch(`${API}/auth/login`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          identificador,
+          senha
+        })
+      });
+
+      const dados = await resposta.json() as Partial<RespostaLogin> & {
+        mensagem?: string;
+      };
+
+      if (!resposta.ok) {
+        throw new Error(dados.mensagem || "Não foi possível realizar o login.");
+      }
+
+      if (!dados.token || !dados.usuario) {
+        throw new Error("O servidor retornou dados de login inválidos.");
+      }
+
+      sessionStorage.setItem("token", dados.token);
+      sessionStorage.setItem("usuario", JSON.stringify(dados.usuario));
+
+      setToken(dados.token);
+      setUsuario(dados.usuario);
+      setSenha("");
+      setPagina("dashboard");
+      setBusca("");
+      setCarregando(true);
+    } catch (error) {
+      console.error("Erro ao realizar login:", error);
+
+      setErro(
+        error instanceof Error
+          ? error.message
+          : "Não foi possível realizar o login."
+      );
+    } finally {
+      setEntrando(false);
+    }
+  };
 
   // Indicadores do dashboard
   const totalLivros = livros.length;
@@ -120,7 +249,7 @@ function App() {
       currency: "BRL"
     }).format(valor);
 
-  // Filtra os livros pela pesquisa e pela página selecionada
+  // Filtra os livros
   const livrosFiltrados = livros.filter((livro) => {
     const termo = busca.toLowerCase();
 
@@ -135,16 +264,20 @@ function App() {
     return correspondeBusca && correspondeEstoque;
   });
 
-  // Abre o formulário para cadastrar
+  // Abre o formulário de cadastro
   const abrirCadastro = () => {
+    setTipoModal("cadastro");
     setLivroEditando(null);
     setFormulario(formularioInicial);
     setErro("");
     setModalAberto(true);
   };
 
-  // Abre o formulário preenchido para editar
+  // Abre a edição completa (administrador)
   const abrirEdicao = (livro: Livro) => {
+    if (!ehAdministrador) return;
+
+    setTipoModal("edicao");
     setLivroEditando(livro._id);
 
     setFormulario({
@@ -163,69 +296,126 @@ function App() {
     setModalAberto(true);
   };
 
+  // Abre a atualização de estoque
+  const abrirAtualizacaoEstoque = (livro: Livro) => {
+    setTipoModal("estoque");
+    setLivroEditando(livro._id);
+    setQuantidadeEstoque(String(livro.estoque));
+    setErro("");
+    setModalAberto(true);
+  };
+
   // Atualiza os campos do formulário
-  const atualizarCampo = (campo: keyof FormularioLivro, valor: string) => {
+  const atualizarCampo = (
+    campo: keyof FormularioLivro,
+    valor: string
+  ) => {
     setFormulario((anterior) => ({
       ...anterior,
       [campo]: valor
     }));
   };
 
-  // Cadastra ou atualiza um livro
+  // Cadastra, edita ou atualiza o estoque
   const salvarLivro = async (evento: FormEvent<HTMLFormElement>) => {
     evento.preventDefault();
 
     setSalvando(true);
     setErro("");
 
-    const dadosLivro = {
-      title: formulario.title.trim(),
-      author: formulario.author.trim(),
-      ano_pub: Number(formulario.ano_pub),
-      classificacao: Number(formulario.classificacao),
-      num_paginas: Number(formulario.num_paginas),
-      estoque: Number(formulario.estoque),
-      genero: formulario.genero.trim(),
-      preco: Number(formulario.preco),
-      sku: formulario.sku.trim()
-    };
-
     try {
-      const resposta = await fetch(
-        livroEditando ? `${API}/${livroEditando}` : API,
-        {
-          method: livroEditando ? "PUT" : "POST",
-          headers: {
-            "Content-Type": "application/json"
-          },
-          body: JSON.stringify(dadosLivro)
+      let resposta: Response;
+
+      if (tipoModal === "estoque") {
+        const quantidade = Number(quantidadeEstoque);
+
+        if (
+          !Number.isInteger(quantidade) ||
+          quantidade < 0
+        ) {
+          throw new Error("Informe uma quantidade inteira igual ou maior que zero.");
         }
-      );
+
+        resposta = await fetch(
+          `${API}/livros/${livroEditando}/estoque`,
+          {
+            method: "PATCH",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${token}`
+            },
+            body: JSON.stringify({ quantidade })
+          }
+        );
+      } else {
+        const dadosLivro = {
+          title: formulario.title.trim(),
+          author: formulario.author.trim(),
+          ano_pub: Number(formulario.ano_pub),
+          classificacao: Number(formulario.classificacao),
+          num_paginas: Number(formulario.num_paginas),
+          genero: formulario.genero.trim(),
+          preco: Number(formulario.preco),
+          sku: formulario.sku.trim(),
+          ...(tipoModal === "cadastro"
+            ? { estoque: Number(formulario.estoque) }
+            : {})
+        };
+
+        resposta = await fetch(
+          tipoModal === "edicao"
+            ? `${API}/livros/${livroEditando}`
+            : `${API}/livros`,
+          {
+            method: tipoModal === "edicao" ? "PUT" : "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${token}`
+            },
+            body: JSON.stringify(dadosLivro)
+          }
+        );
+      }
+
+      if (resposta.status === 401) {
+        sair();
+        throw new Error("Sua sessão expirou. Faça login novamente.");
+      }
+
+      if (resposta.status === 403) {
+        throw new Error("Você não tem permissão para realizar esta ação.");
+      }
 
       if (!resposta.ok) {
-        const mensagem = await resposta.text();
-        throw new Error(mensagem || "Não foi possível salvar o livro.");
+        const dados = await resposta.json().catch(() => null);
+        throw new Error(
+          dados?.mensagem || "Não foi possível salvar as informações."
+        );
       }
 
       setModalAberto(false);
       setFormulario(formularioInicial);
       setLivroEditando(null);
+      setQuantidadeEstoque("");
 
       await carregarLivros();
     } catch (error) {
-      console.error("Erro ao salvar livro:", error);
+      console.error("Erro ao salvar:", error);
+
       setErro(
         error instanceof Error
           ? error.message
-          : "Não foi possível salvar o livro."
+          : "Não foi possível salvar as informações."
       );
     } finally {
       setSalvando(false);
     }
   };
 
-  // Exclui um livro
+  // Exclui um livro (administrador)
   const excluirLivro = async (livro: Livro) => {
+    if (!ehAdministrador) return;
+
     const confirmou = window.confirm(
       `Tem certeza que deseja excluir "${livro.title}"?`
     );
@@ -235,9 +425,21 @@ function App() {
     try {
       setErro("");
 
-      const resposta = await fetch(`${API}/${livro._id}`, {
-        method: "DELETE"
+      const resposta = await fetch(`${API}/livros/${livro._id}`, {
+        method: "DELETE",
+        headers: {
+          Authorization: `Bearer ${token}`
+        }
       });
+
+      if (resposta.status === 401) {
+        sair();
+        return;
+      }
+
+      if (resposta.status === 403) {
+        throw new Error("Apenas administradores podem excluir livros.");
+      }
 
       if (!resposta.ok) {
         throw new Error("Não foi possível excluir o livro.");
@@ -246,7 +448,12 @@ function App() {
       await carregarLivros();
     } catch (error) {
       console.error("Erro ao excluir livro:", error);
-      setErro("Não foi possível excluir o livro.");
+
+      setErro(
+        error instanceof Error
+          ? error.message
+          : "Não foi possível excluir o livro."
+      );
     }
   };
 
@@ -254,6 +461,8 @@ function App() {
     setModalAberto(false);
     setLivroEditando(null);
     setFormulario(formularioInicial);
+    setQuantidadeEstoque("");
+    setErro("");
   };
 
   const tituloPagina = {
@@ -261,6 +470,65 @@ function App() {
     livros: "Seus livros",
     estoque: "Estoque baixo"
   };
+
+  // Tela de login
+  if (!token || !usuario) {
+    return (
+      <div className="tela-login">
+        <div className="login-card">
+          <div className="login-logo">
+            <img src="/cozy-logo.png" alt="Cozy Book Store" />
+          </div>
+
+          <div className="login-titulo">
+            <span className="subtitulo">COZY BOOK STORE</span>
+            <h1>Bem-vindo de volta!</h1>
+            <p>Entre na sua conta para acessar a livraria.</p>
+          </div>
+
+          <form onSubmit={realizarLogin} className="formulario-login">
+            <label>
+              Identificador
+              <input
+                type="text"
+                value={identificador}
+                onChange={(e) => setIdentificador(e.target.value)}
+                placeholder="Digite seu usuário"
+                autoComplete="username"
+                required
+              />
+            </label>
+
+            <label>
+              Senha
+              <input
+                type="password"
+                value={senha}
+                onChange={(e) => setSenha(e.target.value)}
+                placeholder="Digite sua senha"
+                autoComplete="current-password"
+                required
+              />
+            </label>
+
+            {erro && <p className="mensagem-erro">{erro}</p>}
+
+            <button
+              type="submit"
+              className="botao-principal login-botao"
+              disabled={entrando}
+            >
+              {entrando ? "Entrando..." : "Entrar na minha conta"}
+            </button>
+          </form>
+
+          <p className="login-rodape">
+            Um cantinho especial para cuidar dos seus livros.
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="app">
@@ -332,8 +600,26 @@ function App() {
           </button>
 
           <div className="perfil">
-            <span>Bem-vindo(a)!</span>
-            <div className="avatar">L</div>
+            <div className="perfil-info">
+              <strong>{usuario.nome}</strong>
+              <span>
+                {ehAdministrador ? "Administrador" : "Funcionário"}
+              </span>
+            </div>
+
+            <div className="avatar">
+              {usuario.nome.charAt(0).toUpperCase()}
+            </div>
+
+            <button
+              type="button"
+              className="menu-btn"
+              onClick={sair}
+              title="Sair da conta"
+              aria-label="Sair da conta"
+            >
+              <LogOut size={19} />
+            </button>
           </div>
         </header>
 
@@ -343,7 +629,9 @@ function App() {
               <span className="subtitulo">
                 {pagina === "dashboard" ? "VISÃO GERAL" : "GERENCIAMENTO"}
               </span>
+
               <h1>{tituloPagina[pagina]}</h1>
+
               <p>
                 {pagina === "dashboard"
                   ? "Acompanhe o desempenho da sua livraria."
@@ -366,38 +654,44 @@ function App() {
                 <div className="card-icone roxo">
                   <BookOpen />
                 </div>
-                <span>Total de livros</span>
-                <h2>{carregando ? "..." : totalLivros}</h2>
-                <small>Livros cadastrados</small>
+                <span className="card-label">Total de livros</span>
+                <h2 className="card-valor">
+                  {carregando ? "..." : totalLivros}
+                </h2>
+                <small className="card-descricao">Livros cadastrados</small>
               </div>
 
               <div className="card">
                 <div className="card-icone verde">
                   <Package />
                 </div>
-                <span>Unidades em estoque</span>
-                <h2>{carregando ? "..." : totalUnidades}</h2>
-                <small>Exemplares disponíveis</small>
+                <span className="card-label">Unidades em estoque</span>
+                <h2 className="card-valor">
+                  {carregando ? "..." : totalUnidades}
+                </h2>
+                <small className="card-descricao">Exemplares disponíveis</small>
               </div>
 
               <div className="card">
                 <div className="card-icone amarelo">
                   <AlertTriangle />
                 </div>
-                <span>Estoque baixo</span>
-                <h2>{carregando ? "..." : estoqueBaixo}</h2>
-                <small>Precisam de reposição</small>
+                <span className="card-label">Estoque baixo</span>
+                <h2 className="card-valor">
+                  {carregando ? "..." : estoqueBaixo}
+                </h2>
+                <small className="card-descricao">Precisam de reposição</small>
               </div>
 
               <div className="card">
                 <div className="card-icone azul">
                   <TrendingUp />
                 </div>
-                <span>Valor em estoque</span>
-                <h2>
+                <span className="card-label">Valor em estoque</span>
+                <h2 className="card-valor">
                   {carregando ? "..." : formatarMoeda(valorEstoque)}
                 </h2>
-                <small>Valor dos exemplares</small>
+                <small className="card-descricao">Valor dos exemplares</small>
               </div>
             </div>
           )}
@@ -412,6 +706,7 @@ function App() {
                       ? "Todos os livros"
                       : "Seus livros"}
                 </h2>
+
                 <p>
                   {pagina === "estoque"
                     ? "Livros com 5 unidades ou menos."
@@ -456,23 +751,36 @@ function App() {
                     </strong>
 
                     <div className="acoes-livro">
-                      <button
-                        type="button"
-                        onClick={() => abrirEdicao(livro)}
-                        aria-label={`Editar ${livro.title}`}
-                        title="Editar livro"
-                      >
-                        <Pencil size={17} />
-                      </button>
+                      {ehAdministrador && (
+                        <button
+                          type="button"
+                          onClick={() => abrirEdicao(livro)}
+                          aria-label={`Editar ${livro.title}`}
+                          title="Editar dados do livro"
+                        >
+                          <Pencil size={17} />
+                        </button>
+                      )}
 
                       <button
                         type="button"
-                        onClick={() => excluirLivro(livro)}
-                        aria-label={`Excluir ${livro.title}`}
-                        title="Excluir livro"
+                        onClick={() => abrirAtualizacaoEstoque(livro)}
+                        aria-label={`Atualizar estoque de ${livro.title}`}
+                        title="Atualizar estoque"
                       >
-                        <Trash2 size={17} />
+                        <Package size={17} />
                       </button>
+
+                      {ehAdministrador && (
+                        <button
+                          type="button"
+                          onClick={() => excluirLivro(livro)}
+                          aria-label={`Excluir ${livro.title}`}
+                          title="Excluir livro"
+                        >
+                          <Trash2 size={17} />
+                        </button>
+                      )}
                     </div>
                   </div>
                 ))}
@@ -522,8 +830,20 @@ function App() {
             <div className="modal-header">
               <div>
                 <span className="subtitulo">COZY BOOK STORE</span>
-                <h2>{livroEditando ? "Editar livro" : "Novo livro"}</h2>
-                <p>Preencha as informações do livro.</p>
+
+                <h2>
+                  {tipoModal === "estoque"
+                    ? "Atualizar estoque"
+                    : tipoModal === "edicao"
+                      ? "Editar livro"
+                      : "Novo livro"}
+                </h2>
+
+                <p>
+                  {tipoModal === "estoque"
+                    ? "Informe a nova quantidade disponível."
+                    : "Preencha as informações do livro."}
+                </p>
               </div>
 
               <button
@@ -537,108 +857,129 @@ function App() {
             </div>
 
             <form onSubmit={salvarLivro}>
-              <div className="formulario-grid">
-                <label>
-                  Título
-                  <input
-                    required
-                    value={formulario.title}
-                    onChange={(e) => atualizarCampo("title", e.target.value)}
-                    placeholder="Nome do livro"
-                  />
-                </label>
+              {tipoModal === "estoque" ? (
+                <div className="formulario-grid">
+                  <label className="campo-completo">
+                    Nova quantidade em estoque
+                    <input
+                      required
+                      type="number"
+                      min="0"
+                      step="1"
+                      value={quantidadeEstoque}
+                      onChange={(e) => setQuantidadeEstoque(e.target.value)}
+                      placeholder="Informe a quantidade"
+                    />
+                  </label>
+                </div>
+              ) : (
+                <div className="formulario-grid">
+                  <label>
+                    Título
+                    <input
+                      required
+                      value={formulario.title}
+                      onChange={(e) => atualizarCampo("title", e.target.value)}
+                      placeholder="Nome do livro"
+                    />
+                  </label>
 
-                <label>
-                  Autor
-                  <input
-                    required
-                    value={formulario.author}
-                    onChange={(e) => atualizarCampo("author", e.target.value)}
-                    placeholder="Nome do autor"
-                  />
-                </label>
+                  <label>
+                    Autor
+                    <input
+                      required
+                      value={formulario.author}
+                      onChange={(e) => atualizarCampo("author", e.target.value)}
+                      placeholder="Nome do autor"
+                    />
+                  </label>
 
-                <label>
-                  Ano de publicação
-                  <input
-                    required
-                    type="number"
-                    min="0"
-                    value={formulario.ano_pub}
-                    onChange={(e) => atualizarCampo("ano_pub", e.target.value)}
-                  />
-                </label>
+                  <label>
+                    Ano de publicação
+                    <input
+                      required
+                      type="number"
+                      min="0"
+                      value={formulario.ano_pub}
+                      onChange={(e) => atualizarCampo("ano_pub", e.target.value)}
+                    />
+                  </label>
 
-                <label>
-                  Classificação indicativa
-                  <input
-                    required
-                    type="number"
-                    min="0"
-                    value={formulario.classificacao}
-                    onChange={(e) =>
-                      atualizarCampo("classificacao", e.target.value)
-                    }
-                  />
-                </label>
+                  <label>
+                    Classificação indicativa
+                    <input
+                      required
+                      type="number"
+                      min="0"
+                      value={formulario.classificacao}
+                      onChange={(e) =>
+                        atualizarCampo("classificacao", e.target.value)
+                      }
+                    />
+                  </label>
 
-                <label>
-                  Número de páginas
-                  <input
-                    required
-                    type="number"
-                    min="1"
-                    value={formulario.num_paginas}
-                    onChange={(e) =>
-                      atualizarCampo("num_paginas", e.target.value)
-                    }
-                  />
-                </label>
+                  <label>
+                    Número de páginas
+                    <input
+                      required
+                      type="number"
+                      min="1"
+                      value={formulario.num_paginas}
+                      onChange={(e) =>
+                        atualizarCampo("num_paginas", e.target.value)
+                      }
+                    />
+                  </label>
 
-                <label>
-                  Quantidade em estoque
-                  <input
-                    required
-                    type="number"
-                    min="0"
-                    value={formulario.estoque}
-                    onChange={(e) => atualizarCampo("estoque", e.target.value)}
-                  />
-                </label>
+                  {tipoModal === "cadastro" && (
+                    <label>
+                      Quantidade em estoque
+                      <input
+                        required
+                        type="number"
+                        min="0"
+                        value={formulario.estoque}
+                        onChange={(e) =>
+                          atualizarCampo("estoque", e.target.value)
+                        }
+                      />
+                    </label>
+                  )}
 
-                <label>
-                  Gênero
-                  <input
-                    required
-                    value={formulario.genero}
-                    onChange={(e) => atualizarCampo("genero", e.target.value)}
-                    placeholder="Ex.: Romance"
-                  />
-                </label>
+                  <label>
+                    Gênero
+                    <input
+                      required
+                      value={formulario.genero}
+                      onChange={(e) => atualizarCampo("genero", e.target.value)}
+                      placeholder="Ex.: Romance"
+                    />
+                  </label>
 
-                <label>
-                  Preço (R$)
-                  <input
-                    required
-                    type="number"
-                    min="0"
-                    step="0.01"
-                    value={formulario.preco}
-                    onChange={(e) => atualizarCampo("preco", e.target.value)}
-                    placeholder="0,00"
-                  />
-                </label>
+                  <label>
+                    Preço (R$)
+                    <input
+                      required
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      value={formulario.preco}
+                      onChange={(e) => atualizarCampo("preco", e.target.value)}
+                      placeholder="0,00"
+                    />
+                  </label>
 
-                <label className="campo-completo">
-                  SKU
-                  <input
-                    required
-                    value={formulario.sku}
-                    onChange={(e) => atualizarCampo("sku", e.target.value)}
-                    placeholder="Ex.: LIV-0003"
-                  />
-                </label>
-              </div>
+                  <label className="campo-completo">
+                    SKU
+                    <input
+                      required
+                      value={formulario.sku}
+                      onChange={(e) => atualizarCampo("sku", e.target.value)}
+                      placeholder="Ex.: LIV-0003"
+                    />
+                  </label>
+                </div>
+              )}
 
               {erro && <p className="mensagem-erro">{erro}</p>}
 
@@ -658,11 +999,14 @@ function App() {
                   disabled={salvando}
                 >
                   <Save size={17} />
+
                   {salvando
                     ? "Salvando..."
-                    : livroEditando
-                      ? "Salvar alterações"
-                      : "Cadastrar livro"}
+                    : tipoModal === "estoque"
+                      ? "Atualizar estoque"
+                      : tipoModal === "edicao"
+                        ? "Salvar alterações"
+                        : "Cadastrar livro"}
                 </button>
               </div>
             </form>

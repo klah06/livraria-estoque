@@ -890,3 +890,169 @@
     padding: 19px;
   }
 }
+
+
+/* =====================================
+   TELA DE LOGIN
+===================================== */
+
+.tela-login {
+  width: 100%;
+  min-height: 100vh;
+  padding: 25px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background:
+    radial-gradient(circle at top left, #E9DDD2, transparent 40%),
+    #F3EDE3;
+  font-family: 'DM Sans', sans-serif;
+}
+
+.login-card {
+  width: 100%;
+  max-width: 440px;
+  padding: 42px;
+  background: #FBF7F0;
+  border: 1px solid #E8DCCB;
+  border-radius: 18px;
+  box-shadow: 0 12px 40px rgba(73, 53, 43, 0.10);
+  animation: aparecerModal 0.3s ease;
+}
+
+.login-logo {
+  display: flex;
+  justify-content: center;
+  margin-bottom: 25px;
+}
+
+.login-logo img {
+  width: 100%;
+  max-width: 190px;
+  height: auto;
+  object-fit: contain;
+}
+
+.login-titulo {
+  margin-bottom: 28px;
+  text-align: center;
+}
+
+.login-titulo .subtitulo {
+  display: block;
+  margin-bottom: 12px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 2px;
+}
+
+.login-titulo h1 {
+  margin-bottom: 9px;
+  color: #49352B;
+  font-family: 'Playfair Display', serif;
+  font-size: 27px;
+}
+
+.login-titulo p {
+  color: #927E6D;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+/* FORMULÁRIO DE LOGIN */
+
+.formulario-login {
+  display: flex;
+  flex-direction: column;
+  gap: 19px;
+}
+
+.formulario-login label {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  color: #715C4D;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.formulario-login input {
+  width: 100%;
+  padding: 13px 14px;
+  border: 1px solid #E8DCCB;
+  border-radius: 8px;
+  outline: none;
+  background: #F3EDE3;
+  color: #49352B;
+  font-family: 'DM Sans', sans-serif;
+  font-size: 13px;
+  transition: 0.2s;
+}
+
+.formulario-login input:focus {
+  border-color: #A66B4F;
+  box-shadow: 0 0 0 3px rgba(166, 107, 79, 0.12);
+}
+
+.formulario-login input::placeholder {
+  color: #A49383;
+}
+
+.login-botao {
+  width: 100%;
+  min-height: 46px;
+  margin-top: 5px;
+}
+
+.login-rodape {
+  margin-top: 27px;
+  padding-top: 20px;
+  border-top: 1px solid #E8DCCB;
+  color: #A49383;
+  font-size: 11px;
+  text-align: center;
+}
+
+/* PERFIL E BOTÃO DE SAÍDA */
+
+.perfil {
+  gap: 12px;
+}
+
+.perfil > .menu-btn {
+  margin-left: 5px;
+}
+
+/* BOTÃO DE ESTOQUE DO FUNCIONÁRIO */
+
+.acoes-livro button:only-child {
+  background: #E9DDD2;
+  color: #895D46;
+}
+
+.acoes-livro button:only-child:hover {
+  background: #A66B4F;
+  color: #FFFFFF;
+}
+
+/* =====================================
+   RESPONSIVIDADE DO LOGIN
+===================================== */
+
+@media (max-width: 480px) {
+  .tela-login {
+    padding: 18px;
+  }
+
+  .login-card {
+    padding: 28px 22px;
+  }
+
+  .login-logo img {
+    max-width: 160px;
+  }
+
+  .login-titulo h1 {
+    font-size: 24px;
+  }
+}

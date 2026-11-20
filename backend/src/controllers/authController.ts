@@ -6,7 +6,8 @@ import Usuario from "../models/usuario";
 
 export const realizarLogin = async (req: Request, res: Response) => {
     try {
-        const { identificador, senha } = req.body;
+        const corpo = req.body ?? {};
+        const { identificador, senha } = corpo;
 
         // Verifica se os campos foram preenchidos
         if (!identificador || !senha) {
@@ -29,7 +30,7 @@ export const realizarLogin = async (req: Request, res: Response) => {
 
         // Compara a senha informada com o hash armazenado
         const senhaCorreta = await bcrypt.compare(
-            senha,
+            String(senha),
             usuario.senhaHash
         );
 

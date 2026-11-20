@@ -5,7 +5,9 @@ import Usuario from "../models/usuario";
 
 export const atualizarEstoque = async (req: Request, res: Response) => {
     try {
-        const { quantidade } = req.body;
+        // Protege o controller caso o corpo não seja enviado
+        const corpo = req.body ?? {};
+        const { quantidade } = corpo;
 
         // Valida a quantidade recebida
         if (
@@ -58,9 +60,10 @@ export const atualizarEstoque = async (req: Request, res: Response) => {
             tipo = "ajuste";
         }
 
-        // Atualiza o estoque e registra o responsável
+        // Atualiza o estoque
         livro.estoque = quantidadeNova;
 
+        // Registra quem realizou a movimentação
         livro.historicoEstoque.push({
             usuarioId: usuario._id.toString(),
             nomeUsuario: usuario.nome,
@@ -81,7 +84,7 @@ export const atualizarEstoque = async (req: Request, res: Response) => {
         console.error("Erro ao atualizar estoque:", erro);
 
         return res.status(500).json({
-            mensagem: "Erro ao atualizar estoque."
+            mensagem: "Erro interno ao atualizar estoque."
         });
     }
 };

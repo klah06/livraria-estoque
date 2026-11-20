@@ -81,7 +81,7 @@ export const atualizarLivro = async (req: Request, res: Response) => {
             req.params.id,
             req.body,
             {
-                new: true,
+                returnDocument: "after",
                 runValidators: true
             }
         );
